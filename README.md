@@ -11,11 +11,17 @@ merchant-credit exceptions are preserved.
 ## Proven
 
 - Exact transition laws for remittance, release, restoration, and refund.
+- Clause-level witness classification for remitted debts, bondage release,
+  pledge restoration, collection refund, and administrative closure.
+- Timed edict semantics that distinguish pre-edict from post-edict obligations
+  and normalize collection timing from recorded dates.
 - No remissible obligation survives a completed edict.
 - Obligation identifiers, parties, debt kinds, and amounts are preserved.
 - Referential integrity is preserved across obligations, bondages, pledges, and
   collections.
 - Applying the edict twice is equivalent to applying it once.
+- Executed case studies cover agrarian remission, merchant-credit exception,
+  late collection handling, and post-edict non-retroactivity.
 
 ## Build
 

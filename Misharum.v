@@ -191,6 +191,7 @@ Proof.
   - reflexivity.
 Qed.
 
+
 Lemma obligation_is_commercial_exception_spec : forall o,
   obligation_is_commercial_exception o = true <->
   obligation_is_remissible_kind (obligation_kind o) = false.
@@ -1072,4 +1073,868 @@ Proof.
     simpl.
     apply Forall_refund_if_remitted_preserves_refs.
     exact Hcollections.
+Qed.
+
+Inductive EdictClause :=
+| ClauseDebtRemission
+| ClauseBondageRelease
+| ClausePledgeRestoration
+| ClauseCollectionRefund
+| ClauseCommercialException
+| ClauseAdministrativeClosure.
+
+Inductive ClauseWitness :=
+| WitnessDebtRemissionFormula
+| WitnessDebtServitudeFormula
+| WitnessPledgeRestorationFormula
+| WitnessCollectionRefundFormula
+| WitnessCommercialExceptionFormula
+| WitnessAdministrativeClosureFormula.
+
+Definition clause_witness (cl : EdictClause) : ClauseWitness :=
+  match cl with
+  | ClauseDebtRemission => WitnessDebtRemissionFormula
+  | ClauseBondageRelease => WitnessDebtServitudeFormula
+  | ClausePledgeRestoration => WitnessPledgeRestorationFormula
+  | ClauseCollectionRefund => WitnessCollectionRefundFormula
+  | ClauseCommercialException => WitnessCommercialExceptionFormula
+  | ClauseAdministrativeClosure => WitnessAdministrativeClosureFormula
+  end.
+
+Definition classify_obligation_clause (o : Obligation) : EdictClause :=
+  if obligation_is_remissible o then ClauseDebtRemission
+  else if obligation_is_commercial_exception o then ClauseCommercialException
+  else ClauseAdministrativeClosure.
+
+Definition classify_bondage_clause (ids : list nat) (b : Bondage) : EdictClause :=
+  match bondage_status b with
+  | Released => ClauseAdministrativeClosure
+  | Bound =>
+      if id_in (bondage_obligation b) ids then
+        ClauseBondageRelease
+      else ClauseAdministrativeClosure
+  end.
+
+Definition classify_pledge_clause (ids : list nat) (p : Pledge) : EdictClause :=
+  match pledge_status p with
+  | Restored => ClauseAdministrativeClosure
+  | Held =>
+      if id_in (pledge_obligation p) ids then
+        ClausePledgeRestoration
+      else ClauseAdministrativeClosure
+  end.
+
+Definition classify_collection_clause (ids : list nat) (c : Collection) : EdictClause :=
+  match collection_status c with
+  | Refunded => ClauseAdministrativeClosure
+  | Retained =>
+      if collection_before_edict c && id_in (collection_obligation c) ids then
+        ClauseCollectionRefund
+      else ClauseAdministrativeClosure
+  end.
+
+Theorem classify_obligation_clause_exact : forall o,
+  match classify_obligation_clause o with
+  | ClauseDebtRemission =>
+      obligation_is_remissible o = true /\
+      obligation_status (mark_remitted o) = Remitted /\
+      clause_witness (classify_obligation_clause o) = WitnessDebtRemissionFormula
+  | ClauseCommercialException =>
+      obligation_is_commercial_exception o = true /\
+      mark_remitted o = o /\
+      clause_witness (classify_obligation_clause o) =
+      WitnessCommercialExceptionFormula
+  | ClauseAdministrativeClosure =>
+      obligation_status o = Remitted /\
+      mark_remitted o = o /\
+      clause_witness (classify_obligation_clause o) =
+      WitnessAdministrativeClosureFormula
+  | _ => False
+  end.
+Proof.
+  intros [oid creditor debtor kind amount status].
+  destruct status.
+  - destruct kind.
+    all: simpl; repeat split; reflexivity.
+  - destruct kind.
+    all: simpl; repeat split; reflexivity.
+Qed.
+
+Theorem classify_bondage_clause_exact : forall ids b,
+  match classify_bondage_clause ids b with
+  | ClauseBondageRelease =>
+      bondage_status b = Bound /\
+      id_in (bondage_obligation b) ids = true /\
+      bondage_status (release_if_remitted ids b) = Released /\
+      clause_witness (classify_bondage_clause ids b) =
+      WitnessDebtServitudeFormula
+  | ClauseAdministrativeClosure =>
+      (bondage_status b = Released \/
+       (bondage_status b = Bound /\
+        id_in (bondage_obligation b) ids = false)) /\
+      release_if_remitted ids b = b /\
+      clause_witness (classify_bondage_clause ids b) =
+      WitnessAdministrativeClosureFormula
+  | _ => False
+  end.
+Proof.
+  intros ids [household obligation status].
+  destruct status.
+  - unfold classify_bondage_clause.
+    simpl.
+    destruct (id_in obligation ids) eqn:Hid.
+    + split.
+      * reflexivity.
+      * split.
+        -- reflexivity.
+        -- split.
+           ++ apply release_if_remitted_bound.
+              ** reflexivity.
+              ** exact Hid.
+           ++ reflexivity.
+    + split.
+      * right.
+        split.
+        -- reflexivity.
+        -- reflexivity.
+      * split.
+        -- unfold release_if_remitted.
+           simpl.
+           rewrite Hid.
+           reflexivity.
+        -- reflexivity.
+  - simpl.
+    split.
+    + left. reflexivity.
+    + split.
+      * reflexivity.
+      * reflexivity.
+Qed.
+
+Definition distress_obligation_agric : Obligation :=
+  {| obligation_id := 1;
+     obligation_creditor := 100;
+     obligation_debtor := 200;
+     obligation_kind := AgrarianBarley;
+     obligation_amount := 60;
+     obligation_status := Enforceable |}.
+
+Definition distress_obligation_trade : Obligation :=
+  {| obligation_id := 2;
+     obligation_creditor := 101;
+     obligation_debtor := 200;
+     obligation_kind := MerchantLoan;
+     obligation_amount := 90;
+     obligation_status := Enforceable |}.
+
+Definition distress_bondage : Bondage :=
+  {| bondage_household := 200;
+     bondage_obligation := 1;
+     bondage_status := Bound |}.
+
+Definition distress_pledge : Pledge :=
+  {| pledge_holder := 100;
+     pledge_debtor := 200;
+     pledge_obligation := 1;
+     pledge_holding_kind := Field;
+     pledge_status := Held |}.
+
+Definition distress_collection_agric : Collection :=
+  {| collection_obligation := 1;
+     collection_amount := 20;
+     collection_before_edict := true;
+     collection_status := Retained |}.
+
+Definition distress_collection_trade : Collection :=
+  {| collection_obligation := 2;
+     collection_amount := 15;
+     collection_before_edict := true;
+     collection_status := Retained |}.
+
+Definition distress_case : CaseState :=
+  {| state_obligations := [distress_obligation_agric; distress_obligation_trade];
+     state_bondages := [distress_bondage];
+     state_pledges := [distress_pledge];
+     state_collections := [distress_collection_agric; distress_collection_trade] |}.
+
+Definition distress_case_after : CaseState :=
+  {| state_obligations :=
+       [ {| obligation_id := 1;
+            obligation_creditor := 100;
+            obligation_debtor := 200;
+            obligation_kind := AgrarianBarley;
+            obligation_amount := 60;
+            obligation_status := Remitted |};
+         distress_obligation_trade ];
+     state_bondages :=
+       [ {| bondage_household := 200;
+            bondage_obligation := 1;
+            bondage_status := Released |} ];
+     state_pledges :=
+       [ {| pledge_holder := 100;
+            pledge_debtor := 200;
+            pledge_obligation := 1;
+            pledge_holding_kind := Field;
+            pledge_status := Restored |} ];
+     state_collections :=
+       [ {| collection_obligation := 1;
+            collection_amount := 20;
+            collection_before_edict := true;
+            collection_status := Refunded |};
+         distress_collection_trade ] |}.
+
+Example distress_case_exec :
+  apply_misharum distress_case = distress_case_after.
+Proof.
+  reflexivity.
+Qed.
+
+Example distress_case_clause_trace :
+  map classify_obligation_clause (state_obligations distress_case) =
+    [ClauseDebtRemission; ClauseCommercialException].
+Proof.
+  reflexivity.
+Qed.
+
+Example distress_case_integrity :
+  state_referential_integrity distress_case.
+Proof.
+  unfold state_referential_integrity, obligation_ids, distress_case.
+  simpl.
+  repeat split.
+  - constructor.
+    + simpl.
+      left.
+      reflexivity.
+    + constructor.
+  - constructor.
+    + simpl.
+      left.
+      reflexivity.
+    + constructor.
+  - constructor.
+    + simpl.
+      left.
+      reflexivity.
+    + constructor.
+      * simpl.
+        right.
+        left.
+        reflexivity.
+      * constructor.
+Qed.
+
+Example distress_case_integrity_after :
+  state_referential_integrity (apply_misharum distress_case).
+Proof.
+  apply apply_misharum_preserves_referential_integrity.
+  apply distress_case_integrity.
+Qed.
+
+Definition late_collection_obligation : Obligation :=
+  {| obligation_id := 3;
+     obligation_creditor := 110;
+     obligation_debtor := 210;
+     obligation_kind := AgrarianSilver;
+     obligation_amount := 40;
+     obligation_status := Enforceable |}.
+
+Definition late_collection : Collection :=
+  {| collection_obligation := 3;
+     collection_amount := 10;
+     collection_before_edict := false;
+     collection_status := Retained |}.
+
+Definition late_collection_case : CaseState :=
+  {| state_obligations := [late_collection_obligation];
+     state_bondages := [];
+     state_pledges := [];
+     state_collections := [late_collection] |}.
+
+Definition late_collection_case_after : CaseState :=
+  {| state_obligations :=
+       [ {| obligation_id := 3;
+            obligation_creditor := 110;
+            obligation_debtor := 210;
+            obligation_kind := AgrarianSilver;
+            obligation_amount := 40;
+            obligation_status := Remitted |} ];
+     state_bondages := [];
+     state_pledges := [];
+     state_collections := [late_collection] |}.
+
+Example late_collection_case_exec :
+  apply_misharum late_collection_case = late_collection_case_after.
+Proof.
+  reflexivity.
+Qed.
+
+Example late_collection_clause_trace :
+  classify_collection_clause (remitted_ids late_collection_case) late_collection =
+  ClauseAdministrativeClosure.
+Proof.
+  reflexivity.
+Qed.
+
+Definition closed_obligation : Obligation :=
+  {| obligation_id := 4;
+     obligation_creditor := 120;
+     obligation_debtor := 220;
+     obligation_kind := TaxArrear;
+     obligation_amount := 12;
+     obligation_status := Remitted |}.
+
+Definition closed_bondage : Bondage :=
+  {| bondage_household := 220;
+     bondage_obligation := 4;
+     bondage_status := Released |}.
+
+Definition closed_pledge : Pledge :=
+  {| pledge_holder := 120;
+     pledge_debtor := 220;
+     pledge_obligation := 4;
+     pledge_holding_kind := Orchard;
+     pledge_status := Restored |}.
+
+Definition closed_collection : Collection :=
+  {| collection_obligation := 4;
+     collection_amount := 12;
+     collection_before_edict := true;
+     collection_status := Refunded |}.
+
+Definition closed_case : CaseState :=
+  {| state_obligations := [closed_obligation];
+     state_bondages := [closed_bondage];
+     state_pledges := [closed_pledge];
+     state_collections := [closed_collection] |}.
+
+Example closed_case_exec :
+  apply_misharum closed_case = closed_case.
+Proof.
+  reflexivity.
+Qed.
+
+Example closed_case_clause_trace :
+  map classify_obligation_clause (state_obligations closed_case) =
+    [ClauseAdministrativeClosure].
+Proof.
+  reflexivity.
+Qed.
+
+Record TimedObligation := {
+  timed_obligation_payload : Obligation;
+  obligation_incurred_on : nat
+}.
+
+Record TimedCollection := {
+  timed_collection_payload : Collection;
+  collection_recorded_on : nat
+}.
+
+Record TimedCaseState := {
+  timed_edict_day : nat;
+  timed_state_obligations : list TimedObligation;
+  timed_state_bondages : list Bondage;
+  timed_state_pledges : list Pledge;
+  timed_state_collections : list TimedCollection
+}.
+
+Definition obligation_predates_edict (edict_day : nat) (o : TimedObligation) : bool :=
+  obligation_incurred_on o <? edict_day.
+
+Definition timed_obligation_is_remissible (edict_day : nat) (o : TimedObligation) : bool :=
+  obligation_predates_edict edict_day o &&
+  obligation_is_remissible (timed_obligation_payload o).
+
+Definition mark_remitted_timed (edict_day : nat) (o : TimedObligation) : Obligation :=
+  if timed_obligation_is_remissible edict_day o then
+    mark_remitted (timed_obligation_payload o)
+  else timed_obligation_payload o.
+
+Definition timed_remitted_ids (st : TimedCaseState) : list nat :=
+  map (fun o => obligation_id (timed_obligation_payload o))
+    (filter (timed_obligation_is_remissible (timed_edict_day st))
+      (timed_state_obligations st)).
+
+Definition normalize_timed_collection (edict_day : nat) (c : TimedCollection)
+  : Collection :=
+  let payload := timed_collection_payload c in
+  {| collection_obligation := collection_obligation payload;
+     collection_amount := collection_amount payload;
+     collection_before_edict := collection_recorded_on c <? edict_day;
+     collection_status := collection_status payload |}.
+
+Definition refund_timed_if_remitted (edict_day : nat) (ids : list nat)
+    (c : TimedCollection)
+  : Collection :=
+  refund_if_remitted ids (normalize_timed_collection edict_day c).
+
+Definition apply_timed_misharum (st : TimedCaseState) : CaseState :=
+  let ids := timed_remitted_ids st in
+  {| state_obligations :=
+       map (mark_remitted_timed (timed_edict_day st)) (timed_state_obligations st);
+     state_bondages := map (release_if_remitted ids) (timed_state_bondages st);
+     state_pledges := map (restore_if_remitted ids) (timed_state_pledges st);
+     state_collections :=
+       map (refund_timed_if_remitted (timed_edict_day st) ids)
+         (timed_state_collections st) |}.
+
+Lemma mark_remitted_timed_post_edict : forall edict_day o,
+  obligation_predates_edict edict_day o = false ->
+  mark_remitted_timed edict_day o = timed_obligation_payload o.
+Proof.
+  intros edict_day [payload incurred] H.
+  unfold obligation_predates_edict in H.
+  unfold mark_remitted_timed, timed_obligation_is_remissible, obligation_predates_edict.
+  simpl in *.
+  rewrite H.
+  reflexivity.
+Qed.
+
+Lemma mark_remitted_timed_remits : forall edict_day o,
+  timed_obligation_is_remissible edict_day o = true ->
+  obligation_status (mark_remitted_timed edict_day o) = Remitted.
+Proof.
+  intros edict_day [payload incurred] H.
+  unfold mark_remitted_timed, timed_obligation_is_remissible, obligation_predates_edict in *.
+  simpl in *.
+  apply andb_true_iff in H as [Htime Hrem].
+  rewrite Htime.
+  simpl.
+  rewrite Hrem.
+  simpl.
+  apply mark_remitted_remits.
+  exact Hrem.
+Qed.
+
+Lemma normalize_timed_collection_before_edict : forall edict_day c,
+  collection_before_edict (normalize_timed_collection edict_day c) =
+  (collection_recorded_on c <? edict_day).
+Proof.
+  intros edict_day [payload recorded].
+  reflexivity.
+Qed.
+
+Lemma refund_timed_if_remitted_post_edict : forall edict_day ids c,
+  collection_recorded_on c <? edict_day = false ->
+  refund_timed_if_remitted edict_day ids c =
+  normalize_timed_collection edict_day c.
+Proof.
+  intros edict_day ids [payload recorded] H.
+  unfold refund_timed_if_remitted, normalize_timed_collection.
+  simpl in *.
+  destruct payload as [obligation amount before status].
+  simpl in *.
+  destruct status.
+  - rewrite H.
+    reflexivity.
+  - reflexivity.
+Qed.
+
+Lemma mark_remitted_timed_status_exact : forall edict_day o,
+  obligation_status (mark_remitted_timed edict_day o) = Remitted <->
+  obligation_status (timed_obligation_payload o) = Remitted \/
+  timed_obligation_is_remissible edict_day o = true.
+Proof.
+  intros edict_day [payload incurred].
+  unfold mark_remitted_timed, timed_obligation_is_remissible.
+  simpl.
+  destruct (obligation_predates_edict edict_day
+    {| timed_obligation_payload := payload;
+       obligation_incurred_on := incurred |} && obligation_is_remissible payload)
+    eqn:Hremiss.
+  - split; intro H.
+    + right.
+      reflexivity.
+    + apply mark_remitted_remits.
+      apply andb_true_iff in Hremiss as [Htime Hrem].
+      exact Hrem.
+  - split; intro H.
+    + left.
+      exact H.
+    + destruct H as [H | H].
+      * exact H.
+      * discriminate H.
+Qed.
+
+Lemma mark_remitted_timed_remissible_exact : forall edict_day o,
+  timed_obligation_is_remissible edict_day o = true ->
+  obligation_predates_edict edict_day o = true /\
+  obligation_is_remissible (timed_obligation_payload o) = true.
+Proof.
+  intros edict_day [payload incurred] H.
+  unfold timed_obligation_is_remissible, obligation_predates_edict in H.
+  simpl in H.
+  apply andb_true_iff in H as [Htime Hrem].
+  split.
+  - exact Htime.
+  - exact Hrem.
+Qed.
+
+Lemma timed_obligation_is_remissible_intro : forall edict_day o,
+  obligation_predates_edict edict_day o = true ->
+  obligation_is_remissible (timed_obligation_payload o) = true ->
+  timed_obligation_is_remissible edict_day o = true.
+Proof.
+  intros edict_day o Hpred Hrem.
+  unfold timed_obligation_is_remissible.
+  rewrite Hpred.
+  rewrite Hrem.
+  reflexivity.
+Qed.
+
+Lemma mark_remitted_timed_status_exact_expanded : forall edict_day o,
+  obligation_status (mark_remitted_timed edict_day o) = Remitted <->
+  obligation_status (timed_obligation_payload o) = Remitted \/
+  (obligation_predates_edict edict_day o = true /\
+   obligation_is_remissible (timed_obligation_payload o) = true).
+Proof.
+  intros edict_day o.
+  rewrite mark_remitted_timed_status_exact.
+  split; intro H.
+  - destruct H as [H | H].
+    + left.
+      exact H.
+    + right.
+      apply mark_remitted_timed_remissible_exact.
+      exact H.
+  - destruct H as [H | H].
+    + left.
+      exact H.
+    + right.
+      destruct H as [Htime Hrem].
+      apply timed_obligation_is_remissible_intro.
+      * exact Htime.
+      * exact Hrem.
+Qed.
+
+Lemma refund_timed_if_remitted_status_exact : forall edict_day ids c,
+  collection_status (refund_timed_if_remitted edict_day ids c) = Refunded <->
+  collection_status (timed_collection_payload c) = Refunded \/
+  (collection_status (timed_collection_payload c) = Retained /\
+   collection_recorded_on c <? edict_day = true /\
+   id_in (collection_obligation (timed_collection_payload c)) ids = true).
+Proof.
+  intros edict_day ids [payload recorded].
+  unfold refund_timed_if_remitted, normalize_timed_collection.
+  destruct payload as [obligation amount before status].
+  simpl.
+  apply refund_if_remitted_status_exact.
+Qed.
+
+Lemma mark_remitted_timed_preserves_id : forall edict_day o,
+  obligation_id (mark_remitted_timed edict_day o) =
+  obligation_id (timed_obligation_payload o).
+Proof.
+  intros edict_day [payload incurred].
+  unfold mark_remitted_timed.
+  simpl.
+  destruct (timed_obligation_is_remissible edict_day
+    {| timed_obligation_payload := payload;
+       obligation_incurred_on := incurred |}).
+  - apply mark_remitted_preserves_id.
+  - reflexivity.
+Qed.
+
+Lemma refund_timed_if_remitted_preserves_obligation : forall edict_day ids c,
+  collection_obligation (refund_timed_if_remitted edict_day ids c) =
+  collection_obligation (timed_collection_payload c).
+Proof.
+  intros edict_day ids [payload recorded].
+  unfold refund_timed_if_remitted.
+  rewrite refund_if_remitted_preserves_obligation.
+  unfold normalize_timed_collection.
+  destruct payload as [obligation amount before status].
+  reflexivity.
+Qed.
+
+Lemma refund_timed_if_remitted_preserves_before_edict : forall edict_day ids c,
+  collection_before_edict (refund_timed_if_remitted edict_day ids c) =
+  (collection_recorded_on c <? edict_day).
+Proof.
+  intros edict_day ids c.
+  unfold refund_timed_if_remitted.
+  rewrite refund_if_remitted_preserves_before_edict.
+  apply normalize_timed_collection_before_edict.
+Qed.
+
+Definition timed_obligation_ids (st : TimedCaseState) : list nat :=
+  map (fun o => obligation_id (timed_obligation_payload o))
+    (timed_state_obligations st).
+
+Definition timed_state_referential_integrity (st : TimedCaseState) : Prop :=
+  Forall (fun b => In (bondage_obligation b) (timed_obligation_ids st))
+    (timed_state_bondages st) /\
+  Forall (fun p => In (pledge_obligation p) (timed_obligation_ids st))
+    (timed_state_pledges st) /\
+  Forall
+    (fun c => In (collection_obligation (timed_collection_payload c))
+      (timed_obligation_ids st))
+    (timed_state_collections st).
+
+Theorem apply_timed_misharum_preserves_obligation_ids : forall st,
+  map obligation_id (state_obligations (apply_timed_misharum st)) =
+  timed_obligation_ids st.
+Proof.
+  intros [edict_day obligations bondages pledges collections].
+  simpl.
+  induction obligations as [|o obligations IH].
+  - reflexivity.
+  - simpl.
+    rewrite mark_remitted_timed_preserves_id.
+    rewrite IH.
+    reflexivity.
+Qed.
+
+Lemma Forall_refund_timed_if_remitted_preserves_refs :
+  forall edict_day ids refs collections,
+    Forall
+      (fun c => In (collection_obligation (timed_collection_payload c)) refs)
+      collections ->
+    Forall (fun c => In (collection_obligation c) refs)
+      (map (refund_timed_if_remitted edict_day ids) collections).
+Proof.
+  intros edict_day ids refs collections H.
+  induction H as [|c collections Hc Htail IH].
+  - constructor.
+  - simpl.
+    constructor.
+    + rewrite refund_timed_if_remitted_preserves_obligation.
+      exact Hc.
+    + exact IH.
+Qed.
+
+Theorem apply_timed_misharum_preserves_referential_integrity : forall st,
+  timed_state_referential_integrity st ->
+  state_referential_integrity (apply_timed_misharum st).
+Proof.
+  intros st [Hbondages [Hpledges Hcollections]].
+  unfold timed_state_referential_integrity in *.
+  unfold state_referential_integrity.
+  repeat split.
+  - unfold obligation_ids.
+    rewrite apply_timed_misharum_preserves_obligation_ids.
+    simpl.
+    apply Forall_release_if_remitted_preserves_refs.
+    exact Hbondages.
+  - unfold obligation_ids.
+    rewrite apply_timed_misharum_preserves_obligation_ids.
+    simpl.
+    apply Forall_restore_if_remitted_preserves_refs.
+    exact Hpledges.
+  - unfold obligation_ids.
+    rewrite apply_timed_misharum_preserves_obligation_ids.
+    simpl.
+    apply Forall_refund_timed_if_remitted_preserves_refs.
+    exact Hcollections.
+Qed.
+
+Theorem apply_timed_misharum_normalizes_collection_timing : forall st,
+  map collection_before_edict (state_collections (apply_timed_misharum st)) =
+  map (fun c => collection_recorded_on c <? timed_edict_day st)
+    (timed_state_collections st).
+Proof.
+  intros [edict_day obligations bondages pledges collections].
+  simpl.
+  induction collections as [|c collections IH].
+  - reflexivity.
+  - simpl.
+    rewrite refund_timed_if_remitted_preserves_before_edict.
+    f_equal.
+    exact IH.
+Qed.
+
+Definition timed_pre_edict_obligation : TimedObligation :=
+  {| timed_obligation_payload :=
+       {| obligation_id := 5;
+          obligation_creditor := 130;
+          obligation_debtor := 230;
+          obligation_kind := RentArrear;
+          obligation_amount := 25;
+          obligation_status := Enforceable |};
+     obligation_incurred_on := 3 |}.
+
+Definition timed_post_edict_obligation : TimedObligation :=
+  {| timed_obligation_payload :=
+       {| obligation_id := 6;
+          obligation_creditor := 131;
+          obligation_debtor := 230;
+          obligation_kind := AgrarianSilver;
+          obligation_amount := 55;
+          obligation_status := Enforceable |};
+     obligation_incurred_on := 12 |}.
+
+Definition timed_pre_edict_collection : TimedCollection :=
+  {| timed_collection_payload :=
+       {| collection_obligation := 5;
+          collection_amount := 7;
+          collection_before_edict := false;
+          collection_status := Retained |};
+     collection_recorded_on := 4 |}.
+
+Definition timed_post_edict_collection : TimedCollection :=
+  {| timed_collection_payload :=
+       {| collection_obligation := 6;
+          collection_amount := 11;
+          collection_before_edict := true;
+          collection_status := Retained |};
+     collection_recorded_on := 14 |}.
+
+Definition timed_case : TimedCaseState :=
+  {| timed_edict_day := 10;
+     timed_state_obligations :=
+       [timed_pre_edict_obligation; timed_post_edict_obligation];
+     timed_state_bondages := [];
+     timed_state_pledges := [];
+     timed_state_collections :=
+       [timed_pre_edict_collection; timed_post_edict_collection] |}.
+
+Definition timed_case_after : CaseState :=
+  {| state_obligations :=
+       [ {| obligation_id := 5;
+            obligation_creditor := 130;
+            obligation_debtor := 230;
+            obligation_kind := RentArrear;
+            obligation_amount := 25;
+            obligation_status := Remitted |};
+         {| obligation_id := 6;
+            obligation_creditor := 131;
+            obligation_debtor := 230;
+            obligation_kind := AgrarianSilver;
+            obligation_amount := 55;
+            obligation_status := Enforceable |} ];
+     state_bondages := [];
+     state_pledges := [];
+     state_collections :=
+       [ {| collection_obligation := 5;
+            collection_amount := 7;
+            collection_before_edict := true;
+            collection_status := Refunded |};
+         {| collection_obligation := 6;
+            collection_amount := 11;
+            collection_before_edict := false;
+            collection_status := Retained |} ] |}.
+
+Example timed_case_exec :
+  apply_timed_misharum timed_case = timed_case_after.
+Proof.
+  reflexivity.
+Qed.
+
+Theorem classify_pledge_clause_exact : forall ids p,
+  match classify_pledge_clause ids p with
+  | ClausePledgeRestoration =>
+      pledge_status p = Held /\
+      id_in (pledge_obligation p) ids = true /\
+      pledge_status (restore_if_remitted ids p) = Restored /\
+      clause_witness (classify_pledge_clause ids p) =
+      WitnessPledgeRestorationFormula
+  | ClauseAdministrativeClosure =>
+      (pledge_status p = Restored \/
+       (pledge_status p = Held /\
+        id_in (pledge_obligation p) ids = false)) /\
+      restore_if_remitted ids p = p /\
+      clause_witness (classify_pledge_clause ids p) =
+      WitnessAdministrativeClosureFormula
+  | _ => False
+  end.
+Proof.
+  intros ids [holder debtor obligation kind status].
+  destruct status.
+  - unfold classify_pledge_clause.
+    simpl.
+    destruct (id_in obligation ids) eqn:Hid.
+    + split.
+      * reflexivity.
+      * split.
+        -- reflexivity.
+        -- split.
+           ++ apply restore_if_remitted_held.
+              ** reflexivity.
+              ** exact Hid.
+           ++ reflexivity.
+    + split.
+      * right.
+        split.
+        -- reflexivity.
+        -- reflexivity.
+      * split.
+        -- unfold restore_if_remitted.
+           simpl.
+           rewrite Hid.
+           reflexivity.
+        -- reflexivity.
+  - simpl.
+    split.
+    + left. reflexivity.
+    + split.
+      * reflexivity.
+      * reflexivity.
+Qed.
+
+Theorem classify_collection_clause_exact : forall ids c,
+  match classify_collection_clause ids c with
+  | ClauseCollectionRefund =>
+      collection_status c = Retained /\
+      collection_before_edict c = true /\
+      id_in (collection_obligation c) ids = true /\
+      collection_status (refund_if_remitted ids c) = Refunded /\
+      clause_witness (classify_collection_clause ids c) =
+      WitnessCollectionRefundFormula
+  | ClauseAdministrativeClosure =>
+      (collection_status c = Refunded \/
+       (collection_status c = Retained /\
+        (collection_before_edict c = false \/
+         id_in (collection_obligation c) ids = false))) /\
+      refund_if_remitted ids c = c /\
+      clause_witness (classify_collection_clause ids c) =
+      WitnessAdministrativeClosureFormula
+  | _ => False
+  end.
+Proof.
+  intros ids [obligation amount before status].
+  destruct status.
+  - destruct before.
+    + unfold classify_collection_clause.
+      simpl.
+      destruct (id_in obligation ids) eqn:Hid.
+      * split.
+        -- reflexivity.
+        -- split.
+           ++ reflexivity.
+           ++ split.
+              ** reflexivity.
+              ** split.
+                 --- apply refund_if_remitted_retained.
+                     +++ reflexivity.
+                     +++ reflexivity.
+                     +++ exact Hid.
+                 --- reflexivity.
+      * split.
+        -- right.
+           split.
+           ++ reflexivity.
+           ++ right. reflexivity.
+        -- split.
+           ++ unfold refund_if_remitted.
+              simpl.
+              rewrite Hid.
+              reflexivity.
+           ++ reflexivity.
+    + unfold classify_collection_clause.
+      simpl.
+      split.
+      * right.
+        split.
+        -- reflexivity.
+        -- left. reflexivity.
+      * split.
+        -- reflexivity.
+        -- reflexivity.
+  - simpl.
+    split.
+    + left. reflexivity.
+    + split.
+      * reflexivity.
+      * reflexivity.
 Qed.
