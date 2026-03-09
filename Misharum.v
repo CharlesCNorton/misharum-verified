@@ -10,7 +10,7 @@
 (*     "That the strong might not oppress the weak."                          *)
 (*     - Old Babylonian legal prologue, c. 18th century BCE                   *)
 (*                                                                            *)
-(*     Author: Repository maintainer                                          *)
+(*     Author: Charles Norton                                                 *)
 (*     Date: March 8, 2026                                                    *)
 (*     License: MIT                                                           *)
 (*                                                                            *)
